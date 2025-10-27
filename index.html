@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Ponto Diário</title>
+    <link rel="stylesheet" href="style.css"> 
+</head>
+<body>
+
+    <div class="container">
+        <h2>Calculadora de Ponto</h2>
+
+        <div class="date-navigator">
+            <button class="date-nav-btn" onclick="mudarDia(-1)">← Voltar</button>
+            <span id="current-date"></span>
+            <button class="date-nav-btn" onclick="mudarDia(1)">Avançar →</button>
+        </div>
+
+        <div class="input-group">
+            <label for="entradaManha">Entrada (Manhã)</label>
+            <input type="time" id="entradaManha" onchange="calcularPontos()">
+            <button class="register-btn" onclick="registrarPonto('entradaManha')">Registrar</button>
+        </div>
+
+        <div class="input-group">
+            <label for="saidaAlmoco">Saída (Almoço)</label>
+            <input type="time" id="saidaAlmoco" onchange="calcularPontos()">
+            <button class="register-btn" onclick="registrarPonto('saidaAlmoco')">Registrar</button>
+        </div>
+
+        <div class="input-group">
+            <label for="voltaAlmoco">Volta (Almoço)</label>
+            <input type="time" id="voltaAlmoco" onchange="calcularPontos()">
+            <button class="register-btn" onclick="registrarPonto('voltaAlmoco')">Registrar</button>
+        </div>
+
+        <div class="interval-info">
+            Intervalo de Almoço: <span id="lunch-interval">--:--</span>
+        </div>
+
+        <div class="input-group">
+            <label for="saidaFinal">Saída (Final)</label>
+            <input type="time" id="saidaFinal" onchange="calcularPontos()">
+            <button class="register-btn" onclick="registrarPonto('saidaFinal')">Registrar</button>
+        </div>
+
+        <div class="result-box">
+            <p>Total de Horas Trabalhadas: <span id="total-trabalhado">00:00</span></p>
+            <p>Próximo Ponto Recomendado:</p>
+            <div id="next-point">--:--</div>
+        </div>
+
+        <button class="clear-btn" onclick="limparRegistros()">Limpar Registros do Dia</button>
+    </div>
+
+    <script src="script.js"></script> 
+</body>
+</html>
