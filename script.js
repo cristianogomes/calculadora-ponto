@@ -2,7 +2,9 @@
 
 const JORNADA_TOTAL_MINUTOS = 8 * 60; // 8 horas
 const ALMOCO_MINIMO_MINUTOS = 1 * 60; // 1 hora
+const NOTIFICATION_KEY = 'saidaNotification'; // Chave para salvar a notificação
 let dataAtual = new Date(); // Variável global para a data exibida
+let notificationTimeout = null; // Para armazenar o ID do setTimeout
 
 // --- Utilitários de Data e Tempo ---
 
@@ -108,34 +110,23 @@ function carregarDadosDoDia() {
 function updateNavigationButtons() {
     const sortedDates = getSortedRecordedDates();
     const currentDateKey = formatDateKey(dataAtual);
+    const todayKey = formatDateKey(new Date());
     
     const btnPrev = document.querySelector('.date-nav-btn[onclick="mudarDia(-1)"]');
     const btnNext = document.querySelector('.date-nav-btn[onclick="mudarDia(1)"]');
     
-    const isToday = currentDateKey === formatDateKey(new Date());
-
-    // A lista de datas registradas é a única rota de navegação.
-    // Se o dia atual não está registrado, mas é hoje, tratamos "Hoje" como um ponto de entrada/saída.
-    
     let currentIndex = sortedDates.indexOf(currentDateKey);
-    
-    // Se estamos em "Hoje" e hoje não tem registro, a navegação de "Voltar" 
-    // deve ir para o último dia registrado.
-    if (isToday && currentIndex === -1) {
-        btnPrev.disabled = sortedDates.length === 0;
-        btnNext.disabled = true; // Não há como avançar a partir de hoje
-        return;
-    }
+    let isToday = currentDateKey === todayKey;
 
-    // Se estamos em um dia registrado:
-    
-    // 'Voltar' fica desativado se for o primeiro dia registrado
-    btnPrev.disabled = currentIndex === 0;
+    // 'Voltar' fica desativado se:
+    // 1. Não há registros (length === 0)
+    // 2. Se for o primeiro dia registrado
+    btnPrev.disabled = sortedDates.length === 0 || currentIndex === 0;
 
     // 'Avançar' fica desativado se:
     // 1. O dia atual é "Hoje".
     // 2. O dia atual é o último dia registrado.
-    btnNext.disabled = isToday || currentIndex === sortedDates.length - 1;
+    btnNext.disabled = isToday || (sortedDates.length > 0 && currentIndex === sortedDates.length - 1);
 }
 
 function mudarDia(delta) {
@@ -144,38 +135,40 @@ function mudarDia(delta) {
     const todayKey = formatDateKey(new Date());
     const sortedDates = getSortedRecordedDates();
     let currentDateKey = formatDateKey(dataAtual);
-
-    let currentIndex = sortedDates.indexOf(currentDateKey);
-    let newIndex;
     
+    // Calcula o índice atual da data na lista de registros
+    let currentIndex = sortedDates.indexOf(currentDateKey);
+
     if (delta === -1) { // VOLTAR
+        // Se está em "Hoje" (sem registro) e há dias registrados:
         if (currentDateKey === todayKey && currentIndex === -1 && sortedDates.length > 0) {
-            // Caso 1: Está em "Hoje" (sem registro) -> vai para o último dia registrado
-            newIndex = sortedDates.length - 1; 
+             // Vai para o último dia registrado
+            const newDateKey = sortedDates[sortedDates.length - 1];
+            dataAtual = new Date(newDateKey + 'T12:00:00');
+        } else if (currentIndex > 0) {
+            // Vai para o dia registrado anterior
+            const newDateKey = sortedDates[currentIndex - 1];
+            dataAtual = new Date(newDateKey + 'T12:00:00');
         } else {
-            // Caso 2: Está em um dia registrado -> volta para o anterior
-            newIndex = currentIndex - 1;
+            return; // Limite atingido (primeiro dia registrado)
         }
     } else if (delta === 1) { // AVANÇAR
         if (currentDateKey === todayKey) return; // Não avança além de "Hoje"
-        
-        // Vai para o próximo dia registrado
-        newIndex = currentIndex + 1;
+
+        // Vai para o próximo dia registrado ou para hoje
+        if (currentIndex !== -1 && currentIndex < sortedDates.length - 1) {
+            // Vai para o próximo dia registrado
+            const newDateKey = sortedDates[currentIndex + 1];
+            dataAtual = new Date(newDateKey + 'T12:00:00');
+        } else if (currentIndex === sortedDates.length - 1) {
+            // Se estava no último dia registrado, vai para hoje
+            dataAtual = new Date();
+        } else {
+            return; // Limites de navegação atingidos
+        }
     }
-    
-    // Verifica se a nova data é válida
-    if (newIndex >= 0 && newIndex < sortedDates.length) {
-        const newDateKey = sortedDates[newIndex];
-        // Cria a nova data
-        dataAtual = new Date(newDateKey + 'T12:00:00'); 
-    } else if (newIndex === sortedDates.length) {
-        // Se avançou além do último dia registrado (que não é hoje), vai para "Hoje"
-        dataAtual = new Date();
-    } else {
-        return; // Limites de navegação atingidos
-    }
-    
-    // Garante que se a data é hoje, a variável global esteja atualizada
+
+    // Se a data é hoje, atualiza a variável global para o momento exato
     if (formatDateKey(dataAtual) === todayKey) {
         dataAtual = new Date();
     }
@@ -219,6 +212,11 @@ function limparRegistros() {
         dataAtual = new Date();
     }
     
+    // Desliga a notificação se for o dia atual
+    if (formatDateKey(dataAtual) === formatDateKey(new Date())) {
+        toggleNotification(true);
+    }
+
     carregarDadosDoDia(); 
 }
 
@@ -307,32 +305,153 @@ function calcularPontos() {
 
 
     // 4. Exibição e Salvação
-    document.getElementById('total-trabalhado').textContent = minutesToTime(totalTrabalhado);
+    document.getElementById('total-trabalhado').textContent = minutesToTime(horasManha + horasTarde);
     document.getElementById('next-point').textContent = proximoPonto;
     
-    // Salva os dados (necessário para atualizar o histórico ao editar)
     salvarDadosDoDia();
-    updateNavigationButtons();
+    updateNotificationButton(); // Atualiza o estado do botão de notificação
 }
+
+
+// Função para solicitar permissão de notificação (sem alterações)
+function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        alert('Este navegador/dispositivo não suporta notificações.');
+        return Promise.resolve('denied');
+    }
+    return Notification.requestPermission();
+}
+
+/**
+ * Agenda a notificação para a hora de saída.
+ * @param {string} saidaTimeStr Hora de saída prevista (HH:MM).
+ */
+function scheduleNotification(saidaTimeStr) {
+    clearTimeout(notificationTimeout); // 1. Limpa qualquer agendamento anterior
+
+    const [saidaH, saidaM] = saidaTimeStr.split(':').map(Number);
+    const now = new Date();
+    const saidaDate = new Date();
+    
+    saidaDate.setHours(saidaH, saidaM, 0, 0);
+
+    const timeUntilSaida = saidaDate.getTime() - now.getTime();
+
+    // 2. CHECAGEM CRÍTICA: Se a hora de saída já passou ou falta menos de 1 minuto, não agenda.
+    // 60000ms = 1 minuto
+    if (timeUntilSaida <= 60000) { 
+        alert(`Não foi possível agendar. A hora de saída (${saidaTimeStr}) já passou ou está a menos de 1 minuto.`);
+        localStorage.removeItem(NOTIFICATION_KEY);
+        updateNotificationButton();
+        return;
+    }
+
+    // 3. Agenda o alarme
+    notificationTimeout = setTimeout(() => {
+        new Notification('🚨 HORA DO PONTO!', {
+            body: `Está na hora de bater seu último ponto (${saidaTimeStr}) para não fazer hora extra.`,
+            vibrate: [200, 100, 200, 100, 200]
+        });
+        localStorage.removeItem(NOTIFICATION_KEY); // Desativa após disparar
+        updateNotificationButton();
+    }, timeUntilSaida);
+
+    // 4. Salva o estado como ATIVO
+    localStorage.setItem(NOTIFICATION_KEY, saidaTimeStr); 
+    updateNotificationButton();
+    new Notification('Lembrete Agendado!', { body: `Você será notificado às ${saidaTimeStr}.` });
+}
+
+function updateNotificationButton() {
+    const btn = document.getElementById('toggle-notification');
+    const saidaAgendada = localStorage.getItem(NOTIFICATION_KEY);
+    const nextPointText = document.getElementById('next-point').textContent;
+    const isToday = formatDateKey(dataAtual) === formatDateKey(new Date());
+
+    const isSaidaFinalCalculada = nextPointText.includes('Saída Final');
+
+    // Desliga e mostra o estado
+    btn.disabled = false;
+    if (!isToday) {
+        btn.textContent = 'Lembrete disponível apenas para Hoje';
+        btn.style.backgroundColor = '#6c757d';
+        btn.disabled = true;
+        clearTimeout(notificationTimeout);
+        return;
+    }
+
+    if (saidaAgendada) {
+        btn.textContent = `🔔 Lembrete ATIVO para: ${saidaAgendada}`;
+        btn.style.backgroundColor = '#FF5722'; // Laranja para ATIVO
+        btn.onclick = () => { toggleNotification(true); }; 
+    } else if (isSaidaFinalCalculada) {
+        const saidaPrevistaStr = nextPointText.split(' ')[0];
+        btn.textContent = `🔔 Ativar Lembrete para ${saidaPrevistaStr}`;
+        btn.style.backgroundColor = '#007bff';
+        btn.onclick = toggleNotification; 
+    } else {
+         btn.textContent = `Aguardando Saída Final...`;
+         btn.style.backgroundColor = '#6c757d';
+         btn.disabled = true;
+    }
+}
+
+// A função updateNotificationButton permanece inalterada
+function toggleNotification(forceOff = false) {
+    if (forceOff || localStorage.getItem(NOTIFICATION_KEY)) {
+        // Desligar (Este bloco foi o que disparou instantaneamente antes)
+        clearTimeout(notificationTimeout);
+        localStorage.removeItem(NOTIFICATION_KEY);
+        updateNotificationButton();
+        new Notification('Lembrete Desativado', { body: 'O alarme de saída foi cancelado.' });
+        return;
+    }
+
+    // Ligar
+    const nextPointText = document.getElementById('next-point').textContent;
+    const isSaidaFinalCalculada = nextPointText.includes('Saída Final');
+
+    if (isSaidaFinalCalculada) {
+        const saidaPrevistaStr = nextPointText.split(' ')[0];
+        
+        requestNotificationPermission().then(permission => {
+            if (permission === 'granted') {
+                scheduleNotification(saidaPrevistaStr); // Chama a nova função de agendamento
+            } else {
+                alert('Permissão de notificação negada. Verifique as configurações do seu navegador/PWA.');
+            }
+        });
+    } else {
+        alert('A hora de Saída Final ainda não foi calculada.');
+    }
+}
+
 
 // --- Inicialização ---
 
 function inicializarApp() {
+    const todayKey = formatDateKey(new Date());
     const ultimaDataKey = localStorage.getItem('dataAtualExibida');
     const sortedDates = getSortedRecordedDates();
     
-    if (ultimaDataKey && getDadosCompletos()[ultimaDataKey]) {
-        // Carrega o último dia com registro
-        dataAtual = new Date(ultimaDataKey + 'T12:00:00');
-    } else if (sortedDates.length > 0) {
-        // Se a data salva estiver vazia/limpa, vai para o último dia registrado
-        dataAtual = new Date(sortedDates[sortedDates.length - 1] + 'T12:00:00');
-    } else {
-        // Se não houver registros, usa hoje
+    let isToday = false;
+
+    // CORREÇÃO DO BUG: Se a última data salva é diferente de hoje, força a data de hoje.
+    if (!ultimaDataKey || ultimaDataKey !== todayKey) {
+        // Se a última data salva não é hoje, ou é a primeira vez que abre.
         dataAtual = new Date();
+        isToday = true;
+    } else {
+        // Se a última data salva é hoje, carrega o objeto Date salvo.
+        dataAtual = new Date(ultimaDataKey + 'T12:00:00');
     }
     
-    // Adiciona listener para garantir que o salvamento ocorra antes de fechar a aba
+    // Tenta reativar a notificação salva ao carregar a página
+    const saidaAgendada = localStorage.getItem(NOTIFICATION_KEY);
+    if (isToday && saidaAgendada) {
+        scheduleNotification(saidaAgendada);
+    }
+    
     window.addEventListener('beforeunload', salvarDadosDoDia);
 
     carregarDadosDoDia();
